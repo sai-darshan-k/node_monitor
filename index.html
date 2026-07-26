@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KrishiPro — Field Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0A1310;
+    --bg2:#0F1B16;
+    --card:#122019;
+    --card-hi:#16261D;
+    --line:rgba(140,180,155,.14);
+    --line-soft:rgba(140,180,155,.07);
+    --text:#E6EFE9;
+    --text-dim:#8FA79A;
+    --text-faint:#5C7268;
+    --paddy:#5FBE7E;
+    --paddy-dim:#3D8257;
+    --water:#5FA8D9;
+    --amber:#E3A94B;
+    --red:#E2665C;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'IBM Plex Sans', sans-serif;
+    --disp: 'Space Grotesk', sans-serif;
+  }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html{background:var(--bg)}
+  body{
+    font-family:var(--sans);
+    background:
+      radial-gradient(ellipse 900px 500px at 15% -10%, rgba(95,190,126,.08), transparent 60%),
+      radial-gradient(ellipse 700px 500px at 100% 10%, rgba(95,168,217,.06), transparent 55%),
+      var(--bg);
+    color:var(--text);
+    min-height:100vh;
+    padding-bottom:60px;
+  }
+
+  header{
+    border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg, rgba(18,32,25,.6), transparent);
+  }
+  .h-wrap{
+    max-width:1320px;margin:0 auto;padding:28px 32px 22px;
+    display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:20px;
+  }
+  .h-brand{display:flex;align-items:center;gap:14px}
+  .h-mark{
+    width:40px;height:40px;border-radius:9px;
+    background:linear-gradient(155deg, var(--paddy), var(--paddy-dim));
+    display:flex;align-items:center;justify-content:center;
+    font-family:var(--disp);font-weight:700;font-size:17px;color:#08150F;
+    box-shadow:0 4px 18px rgba(95,190,126,.25);
+    flex-shrink:0;
+  }
+  .h-title{font-family:var(--disp);font-weight:700;font-size:21px;letter-spacing:-.01em}
+  .h-sub{font-size:11.5px;color:var(--text-dim);letter-spacing:.06em;text-transform:uppercase;margin-top:2px}
+  .h-stats{display:flex;gap:28px;font-family:var(--mono)}
+  .h-stat{text-align:right}
+  .h-stat-val{font-size:22px;font-weight:600;line-height:1.1}
+  .h-stat-label{font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.08em;margin-top:4px}
+  .stat-ok{color:var(--paddy)}
+  .stat-warn{color:var(--amber)}
+  .stat-bad{color:var(--red)}
+
+  .h-bottom{
+    max-width:1320px;margin:0 auto;padding:0 32px 20px;
+    display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  }
+  .pulse{width:7px;height:7px;border-radius:50%;background:var(--paddy);position:relative;flex-shrink:0}
+  .pulse::after{
+    content:'';position:absolute;inset:-4px;border-radius:50%;
+    border:1px solid var(--paddy);opacity:0;
+    animation:pulseRing 2.2s ease-out infinite;
+  }
+  @keyframes pulseRing{0%{transform:scale(.6);opacity:.7}100%{transform:scale(2.2);opacity:0}}
+  .live-text{font-family:var(--mono);font-size:11.5px;color:var(--text-dim)}
+  .live-text b{color:var(--text)}
+  .refresh-btn{
+    margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--text-dim);
+    background:var(--card);border:1px solid var(--line);border-radius:7px;
+    padding:7px 13px;cursor:pointer;transition:.15s;
+  }
+  .refresh-btn:hover{border-color:var(--paddy-dim);color:var(--text)}
+  .refresh-btn:focus-visible{outline:2px solid var(--paddy);outline-offset:2px}
+
+  main{max-width:1320px;margin:0 auto;padding:8px 32px 0}
+  .section-head{display:flex;align-items:baseline;gap:10px;margin:36px 0 16px}
+  .section-title{font-family:var(--disp);font-weight:600;font-size:15px}
+  .section-count{font-family:var(--mono);font-size:11px;color:var(--text-faint)}
+  .section-line{flex:1;height:1px;background:var(--line)}
+
+  .node-grid{
+    display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;
+  }
+  .node-card{
+    background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:16px 17px 15px;position:relative;overflow:hidden;cursor:pointer;
+    transition:border-color .2s, transform .2s;
+  }
+  .node-card:hover{border-color:var(--paddy-dim);transform:translateY(-1px)}
+  .node-card::before{
+    content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
+    background:var(--edge,var(--paddy));
+  }
+  .node-card.status-ok{--edge:var(--paddy)}
+  .node-card.status-stale{--edge:var(--amber)}
+  .node-card.status-offline{--edge:var(--red)}
+  .node-card.status-nodata{--edge:var(--text-faint)}
+
+  .nc-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+  .nc-id{font-family:var(--mono);font-size:11px;color:var(--text-faint);letter-spacing:.04em}
+  .nc-id b{color:var(--text);font-size:13px;font-weight:600}
+  .nc-badge{
+    font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;
+    padding:3px 7px;border-radius:5px;font-weight:600;
+  }
+  .badge-ok{background:rgba(95,190,126,.14);color:var(--paddy)}
+  .badge-stale{background:rgba(227,169,75,.14);color:var(--amber)}
+  .badge-offline{background:rgba(226,102,92,.14);color:var(--red)}
+  .badge-nodata{background:rgba(140,180,155,.1);color:var(--text-faint)}
+
+  .nc-reading{font-family:var(--mono);font-size:30px;font-weight:600;line-height:1;letter-spacing:-.01em}
+  .nc-reading span{font-size:13px;color:var(--text-dim);font-weight:400;margin-left:3px}
+  .nc-reading.is-err{color:var(--red);font-size:16px;font-weight:500}
+  .nc-label{font-size:10.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-top:5px}
+
+  .nc-meta{display:flex;justify-content:space-between;margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft)}
+  .nc-meta-item{font-family:var(--mono);font-size:10.5px;color:var(--text-dim)}
+  .nc-meta-item b{color:var(--text);font-weight:500}
+  .nc-signal{display:flex;align-items:flex-end;gap:2px;height:11px}
+  .nc-signal i{width:3px;background:var(--line);border-radius:1px;display:block}
+  .nc-signal i:nth-child(1){height:35%}
+  .nc-signal i:nth-child(2){height:55%}
+  .nc-signal i:nth-child(3){height:75%}
+  .nc-signal i:nth-child(4){height:100%}
+  .nc-signal.sig-4 i{background:var(--paddy)}
+  .nc-signal.sig-3 i:nth-child(-n+3){background:var(--paddy)}
+  .nc-signal.sig-2 i:nth-child(-n+2){background:var(--amber)}
+  .nc-signal.sig-1 i:nth-child(1){background:var(--red)}
+
+  .station-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+  .station-card{
+    background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 22px;
+  }
+  .st-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+  .st-name{font-family:var(--disp);font-weight:600;font-size:14.5px}
+  .st-time{font-family:var(--mono);font-size:10px;color:var(--text-faint)}
+  .st-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .st-metric-label{font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.05em}
+  .st-metric-val{font-family:var(--mono);font-size:19px;font-weight:600;margin-top:4px}
+  .st-metric-val span{font-size:11px;color:var(--text-dim);font-weight:400}
+
+  footer{
+    max-width:1320px;margin:50px auto 0;padding:20px 32px;border-top:1px solid var(--line);
+    font-family:var(--mono);font-size:10.5px;color:var(--text-faint);
+    display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;
+  }
+
+  .empty-state{
+    grid-column:1/-1;text-align:center;padding:50px 20px;color:var(--text-faint);
+    font-family:var(--mono);font-size:12px;
+  }
+
+  /* ===== History modal ===== */
+  .modal-backdrop{
+    display:none;position:fixed;inset:0;background:rgba(5,10,8,.75);
+    z-index:100;align-items:center;justify-content:center;padding:20px;
+    backdrop-filter:blur(3px);
+  }
+  .modal-backdrop.open{display:flex}
+  .modal-box{
+    background:var(--card);border:1px solid var(--line);border-radius:16px;
+    width:100%;max-width:820px;max-height:85vh;overflow-y:auto;
+    padding:26px 28px 22px;
+    box-shadow:0 24px 70px rgba(0,0,0,.5);
+  }
+  .modal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
+  .modal-title{font-family:var(--disp);font-weight:700;font-size:19px}
+  .modal-sub{font-family:var(--mono);font-size:11px;color:var(--text-faint);margin-top:2px;margin-bottom:20px}
+  .modal-close{
+    background:none;border:1px solid var(--line);color:var(--text-dim);
+    width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:16px;line-height:1;
+    display:flex;align-items:center;justify-content:center;flex-shrink:0;
+  }
+  .modal-close:hover{color:var(--text);border-color:var(--paddy-dim)}
+  .chart-wrap{width:100%;background:var(--bg2);border-radius:10px;border:1px solid var(--line-soft);margin-bottom:16px}
+  .chart-wrap svg{width:100%;height:260px;display:block}
+  .chart-empty{
+    text-align:center;padding:60px 0;color:var(--text-faint);font-family:var(--mono);font-size:12px;
+  }
+  .modal-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px}
+  .modal-stat{background:var(--bg2);border:1px solid var(--line-soft);border-radius:9px;padding:10px 12px}
+  .modal-stat-label{font-size:9.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.05em}
+  .modal-stat-val{font-family:var(--mono);font-size:17px;font-weight:600;margin-top:3px}
+  .modal-table-wrap{max-height:220px;overflow-y:auto;border:1px solid var(--line-soft);border-radius:9px}
+  table.history-table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11.5px}
+  table.history-table th{
+    position:sticky;top:0;background:var(--card-hi);text-align:left;padding:8px 12px;
+    color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;font-size:9.5px;font-weight:600;
+  }
+  table.history-table td{padding:7px 12px;border-top:1px solid var(--line-soft);color:var(--text)}
+  table.history-table tr:hover td{background:var(--line-soft)}
+  .err-cell{color:var(--red)}
+
+  @media (max-width:640px){
+    .h-wrap{padding:22px 18px 16px}
+    .h-stats{gap:16px}
+    .h-stat-val{font-size:17px}
+    main{padding:8px 18px 0}
+    .node-grid{grid-template-columns:repeat(auto-fill,minmax(155px,1fr))}
+    footer{padding:20px 18px}
+    .modal-stats{grid-template-columns:repeat(2,1fr)}
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .pulse::after{animation:none}
+    .node-card{transition:none}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="h-wrap">
+    <div class="h-brand">
+      <div class="h-mark">K</div>
+      <div>
+        <div class="h-title">KrishiPro Field Monitor</div>
+        <div class="h-sub">AWD Paddy Water Level · 15 Nodes</div>
+      </div>
+    </div>
+    <div class="h-stats">
+      <div class="h-stat"><div class="h-stat-val" id="statOnline">—</div><div class="h-stat-label">Reporting</div></div>
+      <div class="h-stat"><div class="h-stat-val" id="statStale">—</div><div class="h-stat-label">Delayed</div></div>
+      <div class="h-stat"><div class="h-stat-val" id="statOffline">—</div><div class="h-stat-label">Silent 24h+</div></div>
+    </div>
+  </div>
+  <div class="h-bottom">
+    <div class="pulse"></div>
+    <div class="live-text">Auto-refresh <b>30s</b> · Last pull <b id="lastPull">—</b> · Click any node for history</div>
+    <button class="refresh-btn" id="refreshBtn">Refresh now</button>
+  </div>
+</header>
+
+<main>
+
+  <div class="section-head">
+    <div class="section-title">Weather Stations</div>
+    <div class="section-line"></div>
+  </div>
+  <div class="station-grid" id="stationGrid">
+    <div class="empty-state">Loading station data…</div>
+  </div>
+
+  <div class="section-head">
+    <div class="section-title">Field Nodes</div>
+    <div class="section-count" id="nodeCount"></div>
+    <div class="section-line"></div>
+  </div>
+  <div class="node-grid" id="nodeGrid">
+    <div class="empty-state">Loading node data…</div>
+  </div>
+
+</main>
+
+<footer>
+  <span>krishipro-paddy · Realtime Database</span>
+  <span id="footTime">—</span>
+</footer>
+
+<div class="modal-backdrop" id="modalBackdrop">
+  <div class="modal-box">
+    <div class="modal-head">
+      <div>
+        <div class="modal-title" id="modalTitle">Node —</div>
+      </div>
+      <button class="modal-close" id="modalClose" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-sub" id="modalSub">Readings since receiver was last powered on</div>
+    <div class="chart-wrap">
+      <svg id="chartSvg" viewBox="0 0 900 260" preserveAspectRatio="none"></svg>
+      <div class="chart-empty" id="chartEmpty" style="display:none">Not enough readings yet to draw a chart.</div>
+    </div>
+    <div class="modal-stats" id="modalStats"></div>
+    <div class="modal-table-wrap">
+      <table class="history-table">
+        <thead><tr><th>Time</th><th>Distance (cm)</th><th>RSSI</th><th>Packet #</th></tr></thead>
+        <tbody id="historyTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+const FIREBASE_HOST = "https://krishipro-paddy-default-rtdb.firebaseio.com";
+const MAX_NODES = 15;
+const STALE_MINUTES = 45;
+const OFFLINE_HOURS = 24;
+
+function timeAgo(ms){
+  if(!ms) return "never";
+  const diff = Date.now() - ms;
+  if(diff < 0) return "just now";
+  const s = Math.floor(diff/1000);
+  if(s < 60) return s + "s ago";
+  const m = Math.floor(s/60);
+  if(m < 60) return m + "m ago";
+  const h = Math.floor(m/60);
+  if(h < 24) return h + "h " + (m%60) + "m ago";
+  const d = Math.floor(h/24);
+  return d + "d ago";
+}
+
+function signalBars(rssi){
+  if(rssi === undefined || rssi === null) return 0;
+  if(rssi > -85) return 4;
+  if(rssi > -100) return 3;
+  if(rssi > -115) return 2;
+  return 1;
+}
+
+function nodeStatus(ts){
+  if(!ts) return "nodata";
+  const diffMin = (Date.now() - ts) / 60000;
+  if(diffMin < -5) return "nodata";     // timestamp is nonsensically in the future - treat as bad data
+  if(diffMin > OFFLINE_HOURS * 60) return "offline";
+  if(diffMin > STALE_MINUTES) return "stale";
+  return "ok";
+}
+
+// Extracts the current reading whether it's stored directly at /latest
+// (PUT-style overwrite) or nested under Firebase auto-generated push keys
+// (POST-style, e.g. /latest/-OyTXfQRz.../). Picks entry with highest timestamp.
+function extractLatest(latestNode){
+  if(!latestNode) return {};
+  if('timestamp' in latestNode || 'distance' in latestNode || 'temperature' in latestNode){
+    return latestNode;
+  }
+  const keys = Object.keys(latestNode);
+  if(keys.length === 0) return {};
+  let best = null, bestTs = -1;
+  for(const k of keys){
+    const entry = latestNode[k];
+    const ts = entry && entry.timestamp !== undefined ? Number(entry.timestamp) : -1;
+    if(ts >= bestTs){ bestTs = ts; best = entry; }
+  }
+  return best || latestNode[keys[keys.length - 1]] || {};
+}
+
+// Flattens the push-key map (if present) into a sorted array of readings.
+// If /latest holds a single direct object instead, returns just that one point.
+function extractHistory(latestNode){
+  if(!latestNode) return [];
+  if('timestamp' in latestNode || 'distance' in latestNode){
+    return [latestNode];
+  }
+  return Object.values(latestNode)
+    .filter(e => e && e.timestamp !== undefined)
+    .sort((a,b) => Number(a.timestamp) - Number(b.timestamp));
+}
+
+let nodeHistoryStore = {};
+
+function renderNodes(nodes){
+  const grid = document.getElementById('nodeGrid');
+  let html = "";
+  let okCount=0, staleCount=0, offlineCount=0;
+
+  for(let id=1; id<=MAX_NODES; id++){
+    const n = nodes[id] || {};
+    const ts = n.timestamp ? Number(n.timestamp) : null;
+    const status = nodeStatus(ts);
+    if(status==="ok") okCount++;
+    else if(status==="stale") staleCount++;
+    else if(status==="offline") offlineCount++;
+
+    const badgeText = status==="ok" ? "Live" : status==="stale" ? "Delayed" : status==="offline" ? "Silent" : "No data";
+    const bars = signalBars(n.rssi);
+    const isErr = n.distance === undefined || n.distance === null || n.distance < 0 || n.distance === "ERR";
+    const histCount = (nodeHistoryStore[id] || []).length;
+
+    html += `
+    <div class="node-card status-${status}" data-node-id="${id}">
+      <div class="nc-top">
+        <div class="nc-id">NODE <b>${String(id).padStart(2,'0')}</b></div>
+        <div class="nc-badge badge-${status}">${badgeText}</div>
+      </div>
+      ${isErr
+        ? `<div class="nc-reading is-err">SENSOR ERR</div>`
+        : `<div class="nc-reading">${Number(n.distance).toFixed(1)}<span>cm</span></div>`
+      }
+      <div class="nc-label">Distance to water ${histCount ? `· ${histCount} logged` : ''}</div>
+      <div class="nc-meta">
+        <div class="nc-meta-item">Pkt <b>#${n.count ?? '—'}</b></div>
+        <div class="nc-meta-item">${timeAgo(ts)}</div>
+        <div class="nc-signal sig-${bars}"><i></i><i></i><i></i><i></i></div>
+      </div>
+    </div>`;
+  }
+
+  grid.innerHTML = html;
+  document.getElementById('nodeCount').textContent = `${okCount} of ${MAX_NODES} reporting normally`;
+  document.getElementById('statOnline').textContent = okCount;
+  document.getElementById('statOnline').className = 'h-stat-val ' + (okCount===MAX_NODES?'stat-ok':okCount>MAX_NODES*0.6?'stat-warn':'stat-bad');
+  document.getElementById('statStale').textContent = staleCount;
+  document.getElementById('statStale').className = 'h-stat-val ' + (staleCount>0?'stat-warn':'stat-ok');
+  document.getElementById('statOffline').textContent = offlineCount;
+  document.getElementById('statOffline').className = 'h-stat-val ' + (offlineCount>0?'stat-bad':'stat-ok');
+
+  grid.querySelectorAll('.node-card').forEach(card => {
+    card.addEventListener('click', () => openHistoryModal(Number(card.dataset.nodeId)));
+  });
+}
+
+function renderStations(station1, station2){
+  const grid = document.getElementById('stationGrid');
+  const cards = [];
+  if(station1 && Object.keys(station1).length) cards.push(stationCardHTML("Station 1", station1, true));
+  if(station2 && Object.keys(station2).length) cards.push(stationCardHTML("Station 2", station2, false));
+  grid.innerHTML = cards.length ? cards.join("") : `<div class="empty-state">No station data yet</div>`;
+}
+
+function stationCardHTML(name, d, hasRain){
+  const ts = d.timestamp ? Number(d.timestamp) : null;
+  const metrics = [
+    { label:"Temp", val: d.temperature!==undefined ? d.temperature.toFixed(1) : "—", unit:"°C" },
+    { label:"Humidity", val: d.humidity!==undefined ? d.humidity.toFixed(0) : "—", unit:"%" },
+    { label:"Pressure", val: d.pressure!==undefined ? d.pressure.toFixed(0) : "—", unit:"hPa" },
+    { label:"Wind Speed", val: d.windSpeed!==undefined ? d.windSpeed.toFixed(1) : "—", unit:"m/s" },
+    { label:"Wind Dir", val: d.windDir ?? "—", unit:"" },
+    hasRain
+      ? { label:"Rainfall", val: d.rainfall!==undefined ? d.rainfall.toFixed(1) : "—", unit:"mm" }
+      : { label:"Wind Deg", val: d.windDirDegrees!==undefined ? d.windDirDegrees : "—", unit:"°" },
+  ];
+  return `
+  <div class="station-card">
+    <div class="st-head">
+      <div class="st-name">${name}</div>
+      <div class="st-time">${timeAgo(ts)}</div>
+    </div>
+    <div class="st-metrics">
+      ${metrics.map(m => `
+        <div>
+          <div class="st-metric-label">${m.label}</div>
+          <div class="st-metric-val">${m.val}${m.unit ? `<span>${m.unit}</span>`:''}</div>
+        </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+async function loadData(){
+  try{
+    const res = await fetch(`${FIREBASE_HOST}/.json`);
+    const data = await res.json();
+
+    const nodesRaw = data.nodes || {};
+    const nodes = {};
+    nodeHistoryStore = {};
+    for(const id in nodesRaw){
+      nodes[id] = extractLatest(nodesRaw[id]?.latest);
+      nodeHistoryStore[id] = extractHistory(nodesRaw[id]?.latest);
+    }
+
+    renderNodes(nodes);
+    renderStations(extractLatest(data.station?.latest), extractLatest(data.station2?.latest));
+
+    const now = new Date();
+    document.getElementById('lastPull').textContent = now.toLocaleTimeString();
+    document.getElementById('footTime').textContent = now.toLocaleString();
+  }catch(err){
+    console.error("Firebase fetch failed:", err);
+    document.getElementById('lastPull').textContent = "fetch failed";
+  }
+}
+
+document.getElementById('refreshBtn').addEventListener('click', loadData);
+loadData();
+setInterval(loadData, 30000);
+
+// ===== Node history modal + SVG chart =====
+const modalBackdrop = document.getElementById('modalBackdrop');
+const modalTitle = document.getElementById('modalTitle');
+const modalSub = document.getElementById('modalSub');
+const modalClose = document.getElementById('modalClose');
+const modalStats = document.getElementById('modalStats');
+const historyTableBody = document.getElementById('historyTableBody');
+const chartSvg = document.getElementById('chartSvg');
+const chartEmpty = document.getElementById('chartEmpty');
+
+modalClose.addEventListener('click', () => modalBackdrop.classList.remove('open'));
+modalBackdrop.addEventListener('click', (e) => {
+  if(e.target === modalBackdrop) modalBackdrop.classList.remove('open');
+});
+
+const HISTORY_WINDOW_MS = 3 * 60 * 60 * 1000;   // only show last 3 hours in the history modal
+const FUTURE_TOLERANCE_MS = 5 * 60 * 1000;       // allow up to 5 min of clock drift, reject anything further ahead
+
+function openHistoryModal(nodeId){
+  const now = Date.now();
+  const cutoff = now - HISTORY_WINDOW_MS;
+  const futureLimit = now + FUTURE_TOLERANCE_MS;
+  const fullHistory = nodeHistoryStore[nodeId] || [];
+  const history = fullHistory.filter(h => {
+    const ts = Number(h.timestamp);
+    return ts && ts >= cutoff && ts <= futureLimit;   // drop stale data AND garbage future timestamps
+  });
+
+  modalTitle.textContent = `Node ${String(nodeId).padStart(2,'0')}`;
+  modalSub.textContent = history.length
+    ? `${history.length} reading${history.length===1?'':'s'} in the last 3 hours`
+    : `No readings in the last 3 hours`;
+
+  const valid = history.filter(h => h.distance !== undefined && Number(h.distance) >= 0);
+
+  if(valid.length){
+    const vals = valid.map(h => Number(h.distance));
+    const min = Math.min(...vals).toFixed(1);
+    const max = Math.max(...vals).toFixed(1);
+    const avg = (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1);
+    const errCount = history.length - valid.length;
+    modalStats.innerHTML = `
+      <div class="modal-stat"><div class="modal-stat-label">Min</div><div class="modal-stat-val">${min} cm</div></div>
+      <div class="modal-stat"><div class="modal-stat-label">Max</div><div class="modal-stat-val">${max} cm</div></div>
+      <div class="modal-stat"><div class="modal-stat-label">Avg</div><div class="modal-stat-val">${avg} cm</div></div>
+      <div class="modal-stat"><div class="modal-stat-label">Errors</div><div class="modal-stat-val">${errCount}</div></div>`;
+  } else {
+    modalStats.innerHTML = `<div class="modal-stat" style="grid-column:1/-1"><div class="modal-stat-label">No valid readings yet</div></div>`;
+  }
+
+  chartSvg.innerHTML = '';
+  chartEmpty.style.display = 'none';
+
+  const points = valid.map(h => ({ t: Number(h.timestamp), d: Number(h.distance) }));
+  if(points.length < 2){
+    chartEmpty.style.display = 'block';
+  } else {
+    drawChart(points);
+  }
+
+  const reversed = [...history].reverse();
+  historyTableBody.innerHTML = reversed.map(h => {
+    const isErr = h.distance === undefined || Number(h.distance) < 0;
+    const timeStr = h.timestamp ? new Date(Number(h.timestamp)).toLocaleString() : '—';
+    return `<tr>
+      <td>${timeStr}</td>
+      <td class="${isErr ? 'err-cell' : ''}">${isErr ? 'ERR' : Number(h.distance).toFixed(1)}</td>
+      <td>${h.rssi ?? '—'}</td>
+      <td>#${h.count ?? '—'}</td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="4" style="text-align:center;color:var(--text-faint)">No data yet</td></tr>`;
+
+  modalBackdrop.classList.add('open');
+}
+
+function drawChart(points){
+  const W = 900, H = 260, padL = 46, padR = 16, padT = 16, padB = 30;
+  const innerW = W - padL - padR;
+  const innerH = H - padT - padB;
+
+  const minT = points[0].t, maxT = points[points.length-1].t;
+  const minD = Math.min(...points.map(p=>p.d));
+  const maxD = Math.max(...points.map(p=>p.d));
+  const dPad = (maxD - minD) * 0.15 || 1;
+  const yMin = minD - dPad, yMax = maxD + dPad;
+
+  const xFor = t => padL + ((t - minT) / (maxT - minT || 1)) * innerW;
+  const yFor = d => padT + innerH - ((d - yMin) / (yMax - yMin || 1)) * innerH;
+
+  const linePath = points.map((p,i) => `${i===0?'M':'L'} ${xFor(p.t).toFixed(1)} ${yFor(p.d).toFixed(1)}`).join(' ');
+  const areaPath = linePath + ` L ${xFor(points[points.length-1].t).toFixed(1)} ${(padT+innerH).toFixed(1)} L ${xFor(points[0].t).toFixed(1)} ${(padT+innerH).toFixed(1)} Z`;
+
+  let gridLines = '', yLabels = '';
+  for(let i=0;i<=4;i++){
+    const val = yMin + (yMax-yMin) * (i/4);
+    const y = yFor(val);
+    gridLines += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" stroke="rgba(140,180,155,.1)" stroke-width="1"/>`;
+    yLabels += `<text x="${padL-8}" y="${(y+3).toFixed(1)}" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="#5C7268">${val.toFixed(0)}</text>`;
+  }
+
+  const fmtTime = ms => new Date(ms).toLocaleString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+  const xLabels = [0, Math.floor(points.length/2), points.length-1].map(i => {
+    const p = points[i];
+    return `<text x="${xFor(p.t).toFixed(1)}" y="${H-8}" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10" fill="#5C7268">${fmtTime(p.t)}</text>`;
+  }).join('');
+
+  const dots = points.map(p => `<circle cx="${xFor(p.t).toFixed(1)}" cy="${yFor(p.d).toFixed(1)}" r="2.5" fill="#5FBE7E"/>`).join('');
+
+  chartSvg.innerHTML = `
+    <defs>
+      <linearGradient id="areaFill" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#5FBE7E" stop-opacity="0.28"/>
+        <stop offset="100%" stop-color="#5FBE7E" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    ${gridLines}
+    ${yLabels}
+    <path d="${areaPath}" fill="url(#areaFill)" stroke="none"/>
+    <path d="${linePath}" fill="none" stroke="#5FBE7E" stroke-width="2"/>
+    ${dots}
+    ${xLabels}
+  `;
+}
+</script>
+
+</body>
+</html>
