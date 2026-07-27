@@ -301,8 +301,15 @@ const MAX_NODES = 15;
 const STALE_MINUTES = 45;
 const OFFLINE_HOURS = 24;
 
+// Some nodes' clocks aren't NTP-synced and send millis()-since-boot instead of a
+// real Unix epoch ms timestamp (typically a few billion ms at most). Any real epoch
+// timestamp for a date after Jan 1 2000 is always larger than that, so this is a safe
+// cutoff for telling "broken clock" apart from "genuinely old reading".
+const MIN_PLAUSIBLE_EPOCH_MS = 946684800000;
+
 function timeAgo(ms){
   if(!ms) return "never";
+  if(ms < MIN_PLAUSIBLE_EPOCH_MS) return "clock unsynced";
   const diff = Date.now() - ms;
   if(diff < 0) return "just now";
   const s = Math.floor(diff/1000);
@@ -325,6 +332,7 @@ function signalBars(rssi){
 
 function nodeStatus(ts){
   if(!ts) return "nodata";
+  if(ts < MIN_PLAUSIBLE_EPOCH_MS) return "nodata"; // device clock not synced - can't judge freshness, don't call it "offline"
   const diffMin = (Date.now() - ts) / 60000;
   if(diffMin < -5) return "nodata";     // timestamp is nonsensically in the future - treat as bad data
   if(diffMin > OFFLINE_HOURS * 60) return "offline";
@@ -332,35 +340,58 @@ function nodeStatus(ts){
   return "ok";
 }
 
-// Extracts the current reading whether it's stored directly at /latest
-// (PUT-style overwrite) or nested under Firebase auto-generated push keys
-// (POST-style, e.g. /latest/-OyTXfQRz.../). Picks entry with highest timestamp.
-function extractLatest(latestNode){
-  if(!latestNode) return {};
-  if('timestamp' in latestNode || 'distance' in latestNode || 'temperature' in latestNode){
-    return latestNode;
-  }
-  const keys = Object.keys(latestNode);
-  if(keys.length === 0) return {};
-  let best = null, bestTs = -1;
-  for(const k of keys){
-    const entry = latestNode[k];
-    const ts = entry && entry.timestamp !== undefined ? Number(entry.timestamp) : -1;
-    if(ts >= bestTs){ bestTs = ts; best = entry; }
-  }
-  return best || latestNode[keys[keys.length - 1]] || {};
+const PUSH_ID_ALPHABET = '-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz';
+
+// Firebase push IDs encode a 48-bit millisecond timestamp in their first 8 characters,
+// assigned by the Realtime Database server at write time - independent of whatever
+// clock the writing device thinks it has. Some nodes' own clocks aren't NTP-synced and
+// report millis()-since-boot in their `timestamp` field instead of a real epoch ms, so
+// this decoded server-assigned time is used as the authoritative "written at" time
+// instead of trusting the device's self-reported field.
+function decodePushIdTime(pushId){
+  if(!pushId) return null;
+  let ts = 0;
+  for(let i = 0; i < 8; i++) ts = ts * 64 + PUSH_ID_ALPHABET.indexOf(pushId[i]);
+  return ts;
 }
 
-// Flattens the push-key map (if present) into a sorted array of readings.
-// If /latest holds a single direct object instead, returns just that one point.
-function extractHistory(latestNode){
-  if(!latestNode) return [];
-  if('timestamp' in latestNode || 'distance' in latestNode){
-    return [latestNode];
+// Recursively collects every leaf reading under /latest (or /readings), tagged with
+// the Firebase push key immediately above it. Handles the normal shape
+// (latest/-pushId: {...}) as well as a buggy shape the ingestion pipeline sometimes
+// produces - an extra level of nesting keyed by the device's own (possibly bogus)
+// timestamp, e.g. latest/<deviceTimestamp>/-pushId: {...}.
+function flattenReadings(node, leafKey){
+  if(!node || typeof node !== 'object') return [];
+  if('timestamp' in node || 'distance' in node || 'temperature' in node){
+    const writeTime = leafKey ? decodePushIdTime(leafKey) : (node.timestamp !== undefined ? Number(node.timestamp) : null);
+    return [{ key: leafKey || '', writeTime, entry: node }];
   }
-  return Object.values(latestNode)
-    .filter(e => e && e.timestamp !== undefined)
-    .sort((a,b) => Number(a.timestamp) - Number(b.timestamp));
+  let out = [];
+  for(const k in node) out = out.concat(flattenReadings(node[k], k));
+  return out;
+}
+
+// Firebase push keys are lexicographically sortable by creation time, unlike the
+// device-reported timestamp field (unreliable - see MIN_PLAUSIBLE_EPOCH_MS above),
+// so recency is decided by push key, not by the reading's own timestamp.
+function sortedReadings(latestNode){
+  return flattenReadings(latestNode).sort((a,b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+}
+
+// Returns readings with `timestamp` overridden to the reliable write time (decoded
+// from the push key when one exists), so every downstream consumer - status badges,
+// "time ago" labels, the history chart/table - works off a trustworthy clock.
+function withResolvedTimestamp(r){
+  return { ...r.entry, timestamp: r.writeTime ?? r.entry.timestamp };
+}
+
+function extractLatest(latestNode){
+  const readings = sortedReadings(latestNode);
+  return readings.length ? withResolvedTimestamp(readings[readings.length - 1]) : {};
+}
+
+function extractHistory(latestNode){
+  return sortedReadings(latestNode).map(withResolvedTimestamp);
 }
 
 let nodeHistoryStore = {};
@@ -496,7 +527,8 @@ modalBackdrop.addEventListener('click', (e) => {
   if(e.target === modalBackdrop) modalBackdrop.classList.remove('open');
 });
 
-const HISTORY_WINDOW_MS = 3 * 60 * 60 * 1000;   // only show last 3 hours in the history modal
+const HISTORY_WINDOW_MS = 12 * 60 * 60 * 1000;   // show last 12 hours in the history modal
+const HISTORY_WINDOW_LABEL = (HISTORY_WINDOW_MS / 3600000) + ' hours';
 const FUTURE_TOLERANCE_MS = 5 * 60 * 1000;       // allow up to 5 min of clock drift, reject anything further ahead
 
 function openHistoryModal(nodeId){
@@ -511,8 +543,8 @@ function openHistoryModal(nodeId){
 
   modalTitle.textContent = `Node ${String(nodeId).padStart(2,'0')}`;
   modalSub.textContent = history.length
-    ? `${history.length} reading${history.length===1?'':'s'} in the last 3 hours`
-    : `No readings in the last 3 hours`;
+    ? `${history.length} reading${history.length===1?'':'s'} in the last ${HISTORY_WINDOW_LABEL}`
+    : `No readings in the last ${HISTORY_WINDOW_LABEL}`;
 
   const valid = history.filter(h => h.distance !== undefined && Number(h.distance) >= 0);
 
