@@ -483,21 +483,32 @@ function stationCardHTML(name, d, hasRain){
   </div>`;
 }
 
+// Firebase's security rules deny reads at the database root (`/.json` 401s) but allow
+// them on these specific branches, so each is fetched individually rather than pulling
+// everything in one `/.json` request.
+async function fetchJson(path){
+  const res = await fetch(`${FIREBASE_HOST}/${path}.json`);
+  if(!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
+  return res.json();
+}
+
 async function loadData(){
   try{
-    const res = await fetch(`${FIREBASE_HOST}/.json`);
-    const data = await res.json();
+    const [nodesRaw, station, station2] = await Promise.all([
+      fetchJson('nodes'),
+      fetchJson('station/latest'),
+      fetchJson('station2/latest').catch(() => null),
+    ]);
 
-    const nodesRaw = data.nodes || {};
     const nodes = {};
     nodeHistoryStore = {};
-    for(const id in nodesRaw){
+    for(const id in (nodesRaw || {})){
       nodes[id] = extractLatest(nodesRaw[id]?.latest);
       nodeHistoryStore[id] = extractHistory(nodesRaw[id]?.latest);
     }
 
     renderNodes(nodes);
-    renderStations(extractLatest(data.station?.latest), extractLatest(data.station2?.latest));
+    renderStations(extractLatest(station), extractLatest(station2));
 
     const now = new Date();
     document.getElementById('lastPull').textContent = now.toLocaleTimeString();
