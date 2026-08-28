@@ -378,8 +378,17 @@ function flattenReadings(node, leafKey){
 // Firebase push keys are lexicographically sortable by creation time, unlike the
 // device-reported timestamp field (unreliable - see MIN_PLAUSIBLE_EPOCH_MS above),
 // so recency is decided by push key, not by the reading's own timestamp.
+//
+// This dashboard is meant to show only genuine hardware readings, so anything
+// carrying the `simulated` marker (see functions/index.js's
+// simulateDhammanapetNodes) is dropped here rather than displayed. That
+// function never resumes on a node once a real reading has arrived, so a node
+// still showing "no data" here after this filter genuinely has no real reading
+// yet - there's no earlier real entry being hidden behind a later simulated one.
 function sortedReadings(latestNode){
-  return flattenReadings(latestNode).sort((a,b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+  return flattenReadings(latestNode)
+    .filter(r => r.entry.simulated !== true)
+    .sort((a,b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
 }
 
 // Returns readings with `timestamp` overridden to the reliable write time (decoded
@@ -458,9 +467,16 @@ function renderStations(station1, station2){
 
 function stationCardHTML(name, d, hasRain){
   const ts = d.timestamp ? Number(d.timestamp) : null;
+  // temperature/humidity get swapped for Dhammanapet's real weather-API values
+  // when the local BME280 isn't at the field site yet (see functions/index.js's
+  // overrideStation2Weather) - `weatherSource` marks that swap. This dashboard
+  // shows only genuine on-site hardware readings, so those two are hidden here
+  // too, same as simulated node readings above. Wind stays as-is either way -
+  // that sensor is never touched by the override.
+  const overridden = d.weatherSource !== undefined;
   const metrics = [
-    { label:"Temp", val: d.temperature!==undefined ? d.temperature.toFixed(1) : "—", unit:"°C" },
-    { label:"Humidity", val: d.humidity!==undefined ? d.humidity.toFixed(0) : "—", unit:"%" },
+    { label:"Temp", val: (!overridden && d.temperature!==undefined) ? d.temperature.toFixed(1) : "—", unit:"°C" },
+    { label:"Humidity", val: (!overridden && d.humidity!==undefined) ? d.humidity.toFixed(0) : "—", unit:"%" },
     { label:"Pressure", val: d.pressure!==undefined ? d.pressure.toFixed(0) : "—", unit:"hPa" },
     { label:"Wind Speed", val: d.windSpeed!==undefined ? d.windSpeed.toFixed(1) : "—", unit:"m/s" },
     { label:"Wind Dir", val: d.windDir ?? "—", unit:"" },
