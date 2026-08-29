@@ -424,6 +424,18 @@ function renderNodes(nodes){
     const bars = signalBars(n.rssi);
     const isErr = n.distance === undefined || n.distance === null || n.distance < 0 || n.distance === "ERR";
 
+    // No currently-displayed reading (filtered out as a placeholder, or
+    // genuinely nothing) - fall back to when real hardware last actually
+    // wrote here (see functions/index.js's watchWaterLevel), rather than
+    // just saying "never" when it may simply be covered by a placeholder
+    // right now.
+    const lastSeenMs = n.lastRealSeenAt ? Number(n.lastRealSeenAt) : null;
+    const metaTimeText = ts
+      ? timeAgo(ts)
+      : lastSeenMs
+        ? `Last seen ${timeAgo(lastSeenMs)}`
+        : "never";
+
     html += `
     <div class="node-card status-${status}" data-node-id="${id}">
       <div class="nc-top">
@@ -437,7 +449,7 @@ function renderNodes(nodes){
       <div class="nc-label">Distance to water · click for history</div>
       <div class="nc-meta">
         <div class="nc-meta-item">Pkt <b>#${n.count ?? '—'}</b></div>
-        <div class="nc-meta-item">${timeAgo(ts)}</div>
+        <div class="nc-meta-item">${metaTimeText}</div>
         <div class="nc-signal sig-${bars}"><i></i><i></i><i></i><i></i></div>
       </div>
     </div>`;
@@ -474,6 +486,8 @@ function stationCardHTML(name, d, hasRain){
   // too, same as simulated node readings above. Wind stays as-is either way -
   // that sensor is never touched by the override.
   const overridden = d.weatherSource !== undefined;
+  const lastSeenMs = d.lastRealSeenAt ? Number(d.lastRealSeenAt) : null;
+  const timeText = ts ? timeAgo(ts) : (lastSeenMs ? `Last seen ${timeAgo(lastSeenMs)}` : "never");
   const metrics = [
     { label:"Temp", val: (!overridden && d.temperature!==undefined) ? d.temperature.toFixed(1) : "—", unit:"°C" },
     { label:"Humidity", val: (!overridden && d.humidity!==undefined) ? d.humidity.toFixed(0) : "—", unit:"%" },
@@ -488,7 +502,7 @@ function stationCardHTML(name, d, hasRain){
   <div class="station-card">
     <div class="st-head">
       <div class="st-name">${name}</div>
-      <div class="st-time">${timeAgo(ts)}</div>
+      <div class="st-time">${timeText}</div>
     </div>
     <div class="st-metrics">
       ${metrics.map(m => `
@@ -521,6 +535,17 @@ async function fetchLimited(path, limit){
   return res.json();
 }
 
+// A single scalar value, not a list - used for lastRealSeenAt (see
+// functions/index.js's watchWaterLevel / mirrorStation1WindDir), which
+// tracks "when did real hardware last actually write here" independently
+// of whatever's currently at /latest (which might be a placeholder). Cheap:
+// one number, not a subtree.
+async function fetchValue(path){
+  const res = await fetch(`${FIREBASE_HOST}/${path}.json`);
+  if(!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
+  return res.json();
+}
+
 // The recurring poll only ever needs each node's single most recent reading
 // (for the status badge, distance, and "time ago" label) - never the history,
 // which is fetched separately and only on demand (see openHistoryModal below).
@@ -529,23 +554,30 @@ async function loadData(){
     const nodeFetches = [];
     for(let id=1; id<=MAX_NODES; id++){
       nodeFetches.push(
-        fetchLimited(`nodes/${id}/latest`, 1)
-          .then(raw => [id, raw])
-          .catch(() => [id, null])
+        Promise.all([
+          fetchLimited(`nodes/${id}/latest`, 1).catch(() => null),
+          fetchValue(`nodes/${id}/lastRealSeenAt`).catch(() => null),
+        ]).then(([raw, lastRealSeenAt]) => [id, raw, lastRealSeenAt])
       );
     }
 
-    const [nodeResults, station, station2] = await Promise.all([
+    const [nodeResults, station, station2, station1LastRealSeenAt] = await Promise.all([
       Promise.all(nodeFetches),
       fetchLimited('station/latest', 1),
       fetchLimited('station2/latest', 1).catch(() => null),
+      fetchValue('station/lastRealSeenAt').catch(() => null),
     ]);
 
     const nodes = {};
-    for(const [id, raw] of nodeResults) nodes[id] = extractLatest(raw);
+    for(const [id, raw, lastRealSeenAt] of nodeResults){
+      nodes[id] = extractLatest(raw);
+      nodes[id].lastRealSeenAt = lastRealSeenAt;
+    }
 
+    const station1Data = extractLatest(station);
+    station1Data.lastRealSeenAt = station1LastRealSeenAt;
     renderNodes(nodes);
-    renderStations(extractLatest(station), extractLatest(station2));
+    renderStations(station1Data, extractLatest(station2));
 
     const now = new Date();
     document.getElementById('lastPull').textContent = now.toLocaleTimeString();
